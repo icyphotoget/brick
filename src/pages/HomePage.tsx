@@ -84,6 +84,15 @@ export default function HomePage() {
     navigate("/wall#buy");
   };
 
+  // NEW: go to this specific featured brick on the wall
+  const handleSeeFeaturedBrick = () => {
+    if (!featured) {
+      navigate("/wall");
+      return;
+    }
+    navigate(`/wall?brick=${featured.brick_index}`);
+  };
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 pb-16 pt-10 sm:pt-14 lg:pt-16">
       {/* Hero */}
@@ -179,11 +188,7 @@ export default function HomePage() {
                   ? `Brick #${featured.brick_index}`
                   : "Random brick spinning up..."}
               </div>
-              <div className="mt-1 text-[11px] text-slate-500">
-                {featured && (featured.x != null || featured.y != null)
-                  ? `Coords ≈ x=${featured.x ?? "?"}, y=${featured.y ?? "?"}`
-                  : "Coords loading from the void..."}
-              </div>
+              {/* Coordinates removed on purpose */}
               <div className="mt-1 text-xs italic text-slate-700 line-clamp-3">
                 {featured?.message ||
                   `"My tiny corner of the internet."`}
@@ -227,10 +232,10 @@ export default function HomePage() {
 
             <button
               type="button"
-              onClick={handleBuyClick}
+              onClick={handleSeeFeaturedBrick}
               className="rounded-full bg-slate-900 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
             >
-              Get your brick →
+              See this brick on the wall →
             </button>
           </div>
         </div>
