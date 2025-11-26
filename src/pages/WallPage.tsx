@@ -22,8 +22,14 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 
 const WALL_WIDTH = 1000;
 
-const PRICE_SOL = 0.05;
-const PRICE_USDC = 5;
+// NEW: base USD price per brick
+const PRICE_USD_PER_BRICK = 1;
+
+// USDC is ~1:1 with USD, so 1 brick = 1 USDC
+const PRICE_USDC = PRICE_USD_PER_BRICK;
+
+// Fallback assumption if live price fetch fails (e.g. SOL ≈ $150)
+const FALLBACK_SOL_PRICE_USD = 150;
 
 type ReserveResponse = {
   brick: {
@@ -38,6 +44,8 @@ type ReserveResponse = {
     youtube_url?: string | null;
     tiktok_url?: string | null;
     x_url?: string | null;
+    // if you later add donation_wallet to the RPC, you can also include it here
+    // donation_wallet?: string | null;
   };
 };
 
@@ -52,6 +60,8 @@ type WallBrick = {
   tiktok_url: string | null;
   x_url: string | null;
   owner_id: string | null;
+  // add this if you also store donation wallet on the bricks table
+  // donation_wallet: string | null;
 };
 
 export default function WallPage() {
@@ -105,6 +115,51 @@ export default function WallPage() {
   );
   const [highlightMyBricks, setHighlightMyBricks] = useState(false);
 
+  // NEW: live SOL/USD price
+  const [solPriceUsd, setSolPriceUsd] = useState<number | null>(null);
+  const [solPriceError, setSolPriceError] = useState(false);
+
+  // Fetch SOL/USD price periodically (e.g. every 5 minutes)
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchPrice = async () => {
+      try {
+        const res = await fetch(
+          "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
+        );
+        if (!res.ok) throw new Error("Failed to fetch SOL price");
+        const json = await res.json();
+        const price = json?.solana?.usd;
+        if (typeof price !== "number") throw new Error("Bad SOL price data");
+
+        if (!cancelled) {
+          setSolPriceUsd(price);
+          setSolPriceError(false);
+        }
+      } catch (err) {
+        console.error("Error fetching SOL price:", err);
+        if (!cancelled) {
+          setSolPriceError(true);
+        }
+      }
+    };
+
+    fetchPrice();
+    const intervalId = window.setInterval(fetchPrice, 5 * 60 * 1000); // every 5 minutes
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  // Effective SOL price per brick (in SOL)
+  const priceSolPerBrick = useMemo(() => {
+    const solUsd = solPriceUsd ?? FALLBACK_SOL_PRICE_USD;
+    return PRICE_USD_PER_BRICK / solUsd;
+  }, [solPriceUsd]);
+
   useEffect(() => {
     if (location.hash === "#buy") {
       // If user isn’t logged in, send them to login
@@ -147,6 +202,8 @@ export default function WallPage() {
         tiktok_url: row.tiktok_url ?? null,
         x_url: row.x_url ?? null,
         owner_id: row.owner_id ?? null,
+        // if you store donation_wallet in DB, map it here:
+        // donation_wallet: row.donation_wallet ?? null,
       }));
 
       setBricks(mappedBricks);
@@ -189,6 +246,7 @@ export default function WallPage() {
               tiktok_url: newRow.tiktok_url ?? null,
               x_url: newRow.x_url ?? null,
               owner_id: newRow.owner_id ?? null,
+              // donation_wallet: newRow.donation_wallet ?? null,
             };
             if (exists) {
               return prev.map((b) =>
@@ -237,7 +295,7 @@ export default function WallPage() {
       return;
     }
 
-    // NEW: require login to buy a brick
+    // require login to buy a brick
     if (!user) {
       alert("You need to be logged in to buy a brick.");
       navigate("/login?redirect=/wall#buy");
@@ -260,7 +318,10 @@ export default function WallPage() {
       throw new Error("Merchant wallet is not configured.");
     }
 
-    const lamports = Math.round(PRICE_SOL * LAMPORTS_PER_SOL);
+    // Use dynamic SOL price per brick (fallback baked in)
+    const priceInSol = priceSolPerBrick;
+    const lamports = Math.round(priceInSol * LAMPORTS_PER_SOL);
+
     const tx = new Transaction().add(
       SystemProgram.transfer({
         fromPubkey: publicKey,
@@ -294,6 +355,7 @@ export default function WallPage() {
       merchantWallet
     );
 
+    // 1 brick = 1 USDC
     const amount = Math.round(PRICE_USDC * 1_000_000);
     const tx = new Transaction().add(
       createTransferInstruction(
@@ -310,7 +372,7 @@ export default function WallPage() {
   };
 
   const handleComplete = async (values: BuyBrickFormValues) => {
-    // NEW: double-safety – must be logged in and have a brick selected
+    // must be logged in and have a brick selected
     if (!user) {
       alert("You need to be logged in to buy a brick.");
       setBuyOpen(false);
@@ -346,6 +408,13 @@ export default function WallPage() {
           p_recipient_name: values.recipient_name ?? null,
           p_recipient_email: values.recipient_email ?? null,
           p_gift_note: values.gift_note ?? null,
+          // if your RPC has payment fields, you can also add:
+          // p_payment_token: values.paymentToken,
+          // p_payment_amount: PRICE_USD_PER_BRICK,
+          // p_solana_tx_signature: values.paymentToken === "SOL" ? signature ?? null : null,
+          // p_usdc_tx_signature: values.paymentToken === "USDC" ? signature ?? null : null,
+          // and donation if you wired it:
+          // p_donation_wallet: values.donation_wallet ?? null,
         }
       );
 
@@ -386,6 +455,7 @@ export default function WallPage() {
           tiktok_url: brick.tiktok_url ?? null,
           x_url: brick.x_url ?? null,
           owner_id: user.id,
+          // donation_wallet: brick.donation_wallet ?? values.donation_wallet ?? null,
         };
         if (exists) {
           return prev.map((b) =>
@@ -444,14 +514,15 @@ export default function WallPage() {
   const hoveredCoords =
     hoveredBrickIndex != null ? getCoords(hoveredBrickIndex) : null;
 
+  const formattedUsd =
+    PRICE_USD_PER_BRICK % 1 === 0
+      ? `$${PRICE_USD_PER_BRICK}`
+      : `$${PRICE_USD_PER_BRICK.toFixed(2)}`;
+
   return (
     <div className="flex min-h-[400px] h-[calc(100vh-64px)] flex-col overflow-hidden">
       <div className="relative flex-1">
-       {/* <div className="pointer-events-auto absolute left-3 top-3 z-10">
-  <WalletMultiButton />
-</div> */}
-
-
+        {/* The wall grid */}
         <FullWallCanvas
           soldBricks={soldBricks}
           onBrickClick={handleBrickClick}
@@ -459,6 +530,7 @@ export default function WallPage() {
           highlightedBrickIndexes={highlightedIndexes}
         />
 
+        {/* Bottom info bar – text + highlight + price */}
         <div className="pointer-events-none absolute inset-x-0 bottom-3 flex flex-wrap items-center justify-center gap-2 px-3 text-[11px] sm:text-xs md:text-sm">
           <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-full bg-white/85 px-3 py-2 shadow">
             <span className="font-semibold text-slate-800">
@@ -476,12 +548,16 @@ export default function WallPage() {
             </button>
 
             <span className="ml-2 text-[10px] text-slate-500">
-              Price: {PRICE_SOL} SOL or {PRICE_USDC} USDC
+              Price: {formattedUsd} (
+              ≈ {priceSolPerBrick.toFixed(4)} SOL or {PRICE_USDC} USDC
+              {solPriceError ? " · using fallback rate" : ""}
+              )
             </span>
           </div>
         </div>
       </div>
 
+      {/* Modals */}
       <BuyBrickModal
         open={buyOpen}
         onClose={() => setBuyOpen(false)}
@@ -501,6 +577,7 @@ export default function WallPage() {
             youtube_url: selectedBrickDetails.youtube_url,
             tiktok_url: selectedBrickDetails.tiktok_url,
             x_url: selectedBrickDetails.x_url,
+            // donation_wallet: selectedBrickDetails.donation_wallet,
           }
         }
         onClose={() => setDetailsOpen(false)}
