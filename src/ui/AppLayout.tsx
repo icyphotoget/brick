@@ -88,8 +88,17 @@ export default function AppLayout({ children }: Props) {
 
           {/* RIGHT SIDE ACTIONS */}
           <div className="flex items-center gap-2">
-            {/* Single menu button with dropdown */}
-            <div className="relative">
+            {/* Primary CTA - now on the left side of the pair */}
+            <button
+              type="button"
+              onClick={handleBuyBrick}
+              className="inline-flex items-center rounded-full bg-brickYellow px-4 py-1.5 text-xs font-semibold text-slate-900 shadow-md hover:brightness-105"
+            >
+              Buy a brick
+            </button>
+
+            {/* Single menu button with dropdown - now on the right */}
+            <div className="relative ml-1">
               <button
                 type="button"
                 onClick={handleToggleMenu}
@@ -147,15 +156,6 @@ export default function AppLayout({ children }: Props) {
                 </div>
               )}
             </div>
-
-            {/* Primary CTA */}
-            <button
-              type="button"
-              onClick={handleBuyBrick}
-              className="ml-1 inline-flex items-center rounded-full bg-brickYellow px-4 py-1.5 text-xs font-semibold text-slate-900 shadow-md hover:brightness-105"
-            >
-              Buy a brick
-            </button>
           </div>
         </nav>
       </header>
