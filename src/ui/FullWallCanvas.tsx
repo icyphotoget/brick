@@ -41,6 +41,9 @@ export default function FullWallCanvas({
   const isPanning = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
 
+  // NEW: track if this interaction actually dragged
+  const didDrag = useRef(false);
+
   const [hoverBrick, setHoverBrick] = useState<number | null>(null);
 
   const isPinching = useRef(false);
@@ -131,7 +134,7 @@ export default function FullWallCanvas({
 
     // grid lines
     ctx.beginPath();
-    ctx.strokeStyle = "rgba(148, 163, 184, 0.25)"; // slate-400 @ 25%
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.25)";
     ctx.lineWidth = 0.5;
 
     for (let xIdx = startXIndex; xIdx <= endXIndex; xIdx++) {
@@ -195,6 +198,10 @@ export default function FullWallCanvas({
 
   // mouse
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // If we dragged during this interaction, don't treat it as a click
+    if (didDrag.current) {
+      return;
+    }
     if (!onBrickClick) return;
     const info = computeBrickIndexFromPoint(e.clientX, e.clientY);
     if (!info) return;
@@ -207,6 +214,11 @@ export default function FullWallCanvas({
       const dy = e.clientY - lastPos.current.y;
       lastPos.current = { x: e.clientX, y: e.clientY };
       setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+
+      // mark as drag if movement is noticeable
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+        didDrag.current = true;
+      }
       return;
     }
 
@@ -223,12 +235,14 @@ export default function FullWallCanvas({
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     isPanning.current = true;
+    didDrag.current = false; // NEW: reset drag state
     lastPos.current = { x: e.clientX, y: e.clientY };
   };
 
   useEffect(() => {
     const stop = () => {
       isPanning.current = false;
+      // don't reset didDrag here; we keep it for the upcoming click event
     };
     window.addEventListener("mouseup", stop);
     window.addEventListener("touchend", stop);
@@ -252,6 +266,7 @@ export default function FullWallCanvas({
     if (e.touches.length === 1) {
       const t = e.touches[0];
       isPanning.current = true;
+      didDrag.current = false; // reset for touch too
       lastPos.current = { x: t.clientX, y: t.clientY };
     } else if (e.touches.length === 2) {
       const [t1, t2] = [e.touches[0], e.touches[1]];
@@ -272,6 +287,9 @@ export default function FullWallCanvas({
       const dy = t.clientY - lastPos.current.y;
       lastPos.current = { x: t.clientX, y: t.clientY };
       setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+        didDrag.current = true;
+      }
     } else if (e.touches.length === 2) {
       e.preventDefault();
       const [t1, t2] = [e.touches[0], e.touches[1]];
