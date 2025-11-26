@@ -15,11 +15,29 @@ type FeaturedBrick = {
   x_url: string | null;
 };
 
+type SimpleBrick = {
+  brick_index: number;
+  color: string | null;
+  message: string | null;
+};
+
+function shuffle<T>(arr: T[]): T[] {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
 export default function HomePage() {
   const navigate = useNavigate();
 
   const [claimedCount, setClaimedCount] = useState<number | null>(null);
   const [featured, setFeatured] = useState<FeaturedBrick | null>(null);
+  const [recentBricks, setRecentBricks] = useState<SimpleBrick[]>([]);
+  const [randomBricks, setRandomBricks] = useState<SimpleBrick[]>([]);
+  const [loadingRandom, setLoadingRandom] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +49,7 @@ export default function HomePage() {
         setLoading(true);
         setError(null);
 
-        // 1) exact count of sold bricks (fast)
+        // 1) exact count of sold bricks
         const { count, error: countError } = await supabase
           .from("bricks")
           .select("*", { count: "exact", head: true })
@@ -39,17 +57,25 @@ export default function HomePage() {
 
         if (countError) throw countError;
 
-        // 2) one featured brick (latest sold)
+        // 2) latest sold brick as "featured"
         const { data: featuredRows, error: featuredError } = await supabase
           .from("bricks")
-          .select(
-            "brick_index, color, message, x, y, instagram_url, x_url"
-          )
+          .select("brick_index, color, message, x, y, instagram_url, x_url")
           .eq("status", "sold")
           .order("id", { ascending: false })
           .limit(1);
 
         if (featuredError) throw featuredError;
+
+        // 3) recent bricks for ticker + random section
+        const { data: recentRows, error: recentError } = await supabase
+          .from("bricks")
+          .select("brick_index, color, message")
+          .eq("status", "sold")
+          .order("id", { ascending: false })
+          .limit(30);
+
+        if (recentError) throw recentError;
 
         if (!cancelled) {
           setClaimedCount(count ?? 0);
@@ -58,6 +84,9 @@ export default function HomePage() {
               ? (featuredRows[0] as FeaturedBrick)
               : null
           );
+          const recent = (recentRows ?? []) as SimpleBrick[];
+          setRecentBricks(recent);
+          setRandomBricks(shuffle(recent).slice(0, 10));
         }
       } catch (err: any) {
         console.error("Error loading homepage stats:", err);
@@ -84,7 +113,6 @@ export default function HomePage() {
     navigate("/wall#buy");
   };
 
-  // NEW: go to this specific featured brick on the wall
   const handleSeeFeaturedBrick = () => {
     if (!featured) {
       navigate("/wall");
@@ -93,9 +121,22 @@ export default function HomePage() {
     navigate(`/wall?brick=${featured.brick_index}`);
   };
 
+  const handleBrickPreviewClick = (brickIndex: number) => {
+    navigate(`/wall?brick=${brickIndex}`);
+  };
+
+  const handleReloadRandom = () => {
+    if (!recentBricks.length) return;
+    setLoadingRandom(true);
+    setTimeout(() => {
+      setRandomBricks(shuffle(recentBricks).slice(0, 10));
+      setLoadingRandom(false);
+    }, 150); // tiny delay just for visual feedback
+  };
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 pb-16 pt-10 sm:pt-14 lg:pt-16">
-      {/* Hero */}
+      {/* Hero + Featured */}
       <section className="flex flex-col gap-10 lg:flex-row lg:items-center">
         <div className="max-w-xl">
           <div className="mb-3 inline-flex items-center rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold text-slate-700 shadow-sm">
@@ -132,12 +173,7 @@ export default function HomePage() {
               View the wall
             </Link>
 
-            <Link
-              to="/wall"
-              className="text-xs font-semibold text-slate-600 underline-offset-2 hover:underline"
-            >
-              Fullscreen wall
-            </Link>
+            {/* Fullscreen wall link removed */}
           </div>
 
           <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-white/80 px-3 py-1.5 text-[11px] text-slate-600 shadow-sm">
@@ -188,10 +224,9 @@ export default function HomePage() {
                   ? `Brick #${featured.brick_index}`
                   : "Random brick spinning up..."}
               </div>
-              {/* Coordinates removed on purpose */}
+              {/* Coordinates intentionally hidden */}
               <div className="mt-1 text-xs italic text-slate-700 line-clamp-3">
-                {featured?.message ||
-                  `"My tiny corner of the internet."`}
+                {featured?.message || `"My tiny corner of the internet."`}
               </div>
             </div>
           </div>
@@ -240,6 +275,115 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Recent bricks ticker */}
+      {recentBricks.length > 0 && (
+        <section className="mt-10">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            Recent bricks
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {recentBricks.map((b) => (
+              <button
+                key={b.brick_index}
+                type="button"
+                onClick={() => handleBrickPreviewClick(b.brick_index)}
+                className="min-w-[180px] rounded-2xl bg-white/80 px-3 py-2 text-left text-[11px] text-slate-700 shadow-sm hover:bg-white"
+              >
+                <div className="flex items-center gap-2">
+                  <div
+                    className="h-6 w-10 rounded-brick shadow-inner"
+                    style={{ backgroundColor: b.color ?? "#FFD352" }}
+                  />
+                  <div className="flex-1">
+                    <div className="font-semibold">
+                      Brick #{b.brick_index}
+                    </div>
+                    <div className="line-clamp-1 text-[10px] text-slate-500">
+                      {b.message || "No message yet."}
+                    </div>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Why buy a brick section */}
+      <section className="mt-10">
+        <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+          Why buy a brick?
+        </div>
+        <div className="grid gap-3 text-sm text-slate-700 sm:grid-cols-3">
+          <div className="rounded-2xl bg-white/90 p-4 shadow-sm">
+            <div className="mb-1 text-xs font-semibold text-slate-500">
+              🎯 Permanent
+            </div>
+            <p className="text-[12px]">
+              Your brick keeps its message, color and links as long as the wall
+              exists. It&apos;s your tiny permanent spot on the internet.
+            </p>
+          </div>
+          <div className="rounded-2xl bg-white/90 p-4 shadow-sm">
+            <div className="mb-1 text-xs font-semibold text-slate-500">
+              🎨 Custom
+            </div>
+            <p className="text-[12px]">
+              Pick a color, write something funny, shout out a friend or link to
+              your socials, project or brand.
+            </p>
+          </div>
+          <div className="rounded-2xl bg-white/90 p-4 shadow-sm">
+            <div className="mb-1 text-xs font-semibold text-slate-500">
+              🌍 Social
+            </div>
+            <p className="text-[12px]">
+              People can discover you through the wall, share your brick on X
+              and highlight it straight from the grid.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Random bricks section */}
+      {recentBricks.length > 0 && (
+        <section className="mt-10">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Explore the wall
+            </div>
+            <button
+              type="button"
+              onClick={handleReloadRandom}
+              disabled={loadingRandom}
+              className="text-[11px] font-semibold text-slate-600 underline-offset-2 hover:underline disabled:opacity-60"
+            >
+              {loadingRandom ? "Shuffling…" : "Show 10 random bricks"}
+            </button>
+          </div>
+
+          <div className="grid gap-3 text-[11px] text-slate-700 sm:grid-cols-5">
+            {randomBricks.map((b) => (
+              <button
+                key={`rand-${b.brick_index}`}
+                type="button"
+                onClick={() => handleBrickPreviewClick(b.brick_index)}
+                className="flex flex-col items-start gap-1 rounded-2xl bg-white/90 p-3 text-left shadow-sm hover:bg-white"
+              >
+                <div
+                  className="h-6 w-full rounded-brick shadow-inner"
+                  style={{ backgroundColor: b.color ?? "#FFD352" }}
+                />
+                <div className="mt-1 font-semibold">#{b.brick_index}</div>
+                <div className="line-clamp-2 text-[10px] text-slate-500">
+                  {b.message || "Empty brick. Waiting for a message."}
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="mt-10 text-xs text-slate-500">
         Live wall • {TOTAL_BRICKS.toLocaleString()} bricks
