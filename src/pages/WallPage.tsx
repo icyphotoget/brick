@@ -54,11 +54,12 @@ export default function WallPage() {
   const [selectedCoords, setSelectedCoords] = useState<{ x: number; y: number } | null>(
     null
   );
-  const [selectedBrickDetails, setSelectedBrickDetails] = useState<WallBrick | null>(
+  const [selectedBrickDetails, setSelectedBrickDetails] =
+    useState<WallBrick | null>(null);
+
+  const [hoveredBrickIndex, setHoveredBrickIndex] = useState<number | null>(
     null
   );
-
-  const [hoveredBrickIndex, setHoveredBrickIndex] = useState<number | null>(null);
   const [highlightMyBricks, setHighlightMyBricks] = useState(false);
 
   // Open buy modal when URL has #buy
@@ -68,7 +69,7 @@ export default function WallPage() {
     }
   }, [location.hash]);
 
-  // Initial load of sold bricks
+  // Load sold bricks
   useEffect(() => {
     const loadSold = async () => {
       setLoadingWall(true);
@@ -115,7 +116,7 @@ export default function WallPage() {
     loadSold();
   }, []);
 
-  // Realtime updates for new sold bricks
+  // Realtime updates
   useEffect(() => {
     const channel = supabase
       .channel("bricks-realtime-wall")
@@ -294,7 +295,9 @@ export default function WallPage() {
       return;
     }
     if (!myBrickIndexes.length) {
-      alert("You don't own any bricks yet. Click somewhere on the wall to buy one! 🧱");
+      alert(
+        "You don't own any bricks yet. Click somewhere on the wall to buy one! 🧱"
+      );
       return;
     }
     setHighlightMyBricks((prev) => !prev);
@@ -312,7 +315,7 @@ export default function WallPage() {
     hoveredBrickIndex != null ? getCoords(hoveredBrickIndex) : null;
 
   return (
-    <div className="flex min-h-[400px] h-[calc(100vh-64px)] flex-col">
+    <div className="flex min-h-[400px] h-[calc(100vh-64px)] flex-col overflow-hidden">
       <div className="relative flex-1">
         <FullWallCanvas
           soldBricks={soldBricks}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const WALL_WIDTH = 1000;
 const WALL_HEIGHT = 1000;
@@ -35,7 +35,6 @@ export default function FullWallCanvas({
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [layout, setLayout] = useState<LayoutInfo | null>(null);
 
-  // zoom starts at 1, we’ll pick a base cell size manually
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
 
@@ -44,7 +43,6 @@ export default function FullWallCanvas({
 
   const [hoverBrick, setHoverBrick] = useState<number | null>(null);
 
-  // pinch zoom state
   const isPinching = useRef(false);
   const pinchStartDistance = useRef(0);
   const pinchStartZoom = useRef(1);
@@ -55,7 +53,7 @@ export default function FullWallCanvas({
     return map;
   }, [soldBricks]);
 
-  // track container size
+  // container size
   useEffect(() => {
     const cont = containerRef.current;
     if (!cont) return;
@@ -70,18 +68,16 @@ export default function FullWallCanvas({
     return () => window.removeEventListener("resize", resize);
   }, []);
 
-  // clamp zoom
   const clampZoom = (z: number) => Math.min(12, Math.max(0.5, z));
 
-  // compute layout whenever size / zoom / pan change
+  // layout from size/zoom/pan
   useEffect(() => {
     if (size.width === 0 || size.height === 0) return;
 
-    // base brick size: slightly different for mobile vs desktop
     const shortestSide = Math.min(size.width, size.height);
     const baseCell =
       shortestSide < 600
-        ? Math.max(3, Math.floor(shortestSide / 200)) // mobile: a bit bigger
+        ? Math.max(3, Math.floor(shortestSide / 200))
         : Math.max(2, Math.floor(shortestSide / 300));
 
     const cellSize = baseCell * zoom;
@@ -100,7 +96,7 @@ export default function FullWallCanvas({
     });
   }, [size, zoom, pan]);
 
-  // draw
+  // draw grid + sold bricks
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !layout) return;
@@ -115,21 +111,59 @@ export default function FullWallCanvas({
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, layout.width, layout.height);
 
-    // bg
+    const { width, height, cellSize, offsetX, offsetY } = layout;
+
+    // background
     ctx.fillStyle = "#E0F2FE";
-    ctx.fillRect(0, 0, layout.width, layout.height);
+    ctx.fillRect(0, 0, width, height);
 
-    const { cellSize, offsetX, offsetY } = layout;
+    // visible indices
+    const startXIndex = Math.max(0, Math.floor(-offsetX / cellSize));
+    const endXIndex = Math.min(
+      WALL_WIDTH,
+      Math.ceil((width - offsetX) / cellSize)
+    );
+    const startYIndex = Math.max(0, Math.floor(-offsetY / cellSize));
+    const endYIndex = Math.min(
+      WALL_HEIGHT,
+      Math.ceil((height - offsetY) / cellSize)
+    );
 
+    // grid lines
+    ctx.beginPath();
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.25)"; // slate-400 @ 25%
+    ctx.lineWidth = 0.5;
+
+    for (let xIdx = startXIndex; xIdx <= endXIndex; xIdx++) {
+      const x = offsetX + xIdx * cellSize;
+      ctx.moveTo(x, offsetY + startYIndex * cellSize);
+      ctx.lineTo(x, offsetY + endYIndex * cellSize);
+    }
+
+    for (let yIdx = startYIndex; yIdx <= endYIndex; yIdx++) {
+      const y = offsetY + yIdx * cellSize;
+      ctx.moveTo(offsetX + startXIndex * cellSize, y);
+      ctx.lineTo(offsetX + endXIndex * cellSize, y);
+    }
+
+    ctx.stroke();
+
+    // sold bricks on top
     for (const [brickIndex, color] of soldMap.entries()) {
       const xIdx = brickIndex % WALL_WIDTH;
       const yIdx = Math.floor(brickIndex / WALL_WIDTH);
 
+      if (
+        xIdx < startXIndex ||
+        xIdx > endXIndex ||
+        yIdx < startYIndex ||
+        yIdx > endYIndex
+      ) {
+        continue;
+      }
+
       const x = offsetX + xIdx * cellSize;
       const y = offsetY + yIdx * cellSize;
-
-      if (x + cellSize < 0 || y + cellSize < 0) continue;
-      if (x > layout.width || y > layout.height) continue;
 
       ctx.fillStyle = color;
       ctx.fillRect(
@@ -141,7 +175,7 @@ export default function FullWallCanvas({
     }
   }, [layout, soldMap]);
 
-  // helper: position -> brick index
+  // point -> brick index
   const computeBrickIndexFromPoint = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
     if (!canvas || !layout) return null;
@@ -159,7 +193,7 @@ export default function FullWallCanvas({
     return { brickIndex, x: gx, y: gy };
   };
 
-  // mouse events
+  // mouse
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!onBrickClick) return;
     const info = computeBrickIndexFromPoint(e.clientX, e.clientY);
@@ -206,12 +240,14 @@ export default function FullWallCanvas({
     };
   }, []);
 
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+  // WHEEL: trap scroll on container so page doesn't move
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     setZoom((z) => clampZoom(z * (e.deltaY > 0 ? 0.9 : 1.1)));
   };
 
-  // touch events (mobile)
+  // touch
   const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
     if (e.touches.length === 1) {
       const t = e.touches[0];
@@ -274,6 +310,7 @@ export default function FullWallCanvas({
     <div
       ref={containerRef}
       className="relative h-full w-full bg-sky touch-none"
+      onWheel={handleWheel}
     >
       <canvas
         ref={canvasRef}
@@ -282,7 +319,6 @@ export default function FullWallCanvas({
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onMouseDown={handleMouseDown}
-        onWheel={handleWheel}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -316,7 +352,7 @@ export default function FullWallCanvas({
         </button>
       </div>
 
-      {/* Highlight overlays */}
+      {/* Highlights */}
       {layout &&
         overlays.map((o) => {
           const { cellSize, offsetX, offsetY } = layout;
