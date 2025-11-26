@@ -1,189 +1,153 @@
+// src/pages/MyBricksPage.tsx
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabaseClient";
+import { useAuth } from "../lib/auth";
 
-type Brick = {
-  id: string;
+type MyBrick = {
+  id: number;
   brick_index: number;
-  color: string | null;
+  color: string;
   message: string | null;
   facebook_url: string | null;
   instagram_url: string | null;
   youtube_url: string | null;
   tiktok_url: string | null;
   x_url: string | null;
+  owner_id: string | null;
 };
+
+const WALL_WIDTH = 1000;
 
 export default function MyBricksPage() {
   const { user } = useAuth();
-  const [bricks, setBricks] = useState<Brick[]>([]);
   const [loading, setLoading] = useState(true);
+  const [bricks, setBricks] = useState<MyBrick[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) return;
-    const load = async () => {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from("bricks")
-        .select("*")
-        .eq("owner_id", user.id)
-        .order("brick_index", { ascending: true });
-      if (!error && data) setBricks(data as Brick[]);
+    if (!user) {
       setLoading(false);
+      return;
+    }
+
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        console.log("Current user id:", user.id);
+
+        const { data, error } = await supabase
+          .from("bricks")
+          .select(
+            "id, brick_index, color, message, facebook_url, instagram_url, youtube_url, tiktok_url, x_url, owner_id, status"
+          )
+          .eq("owner_id", user.id)
+          .eq("status", "sold")
+          .order("brick_index", { ascending: true });
+
+        if (error) throw error;
+
+        setBricks((data ?? []) as MyBrick[]);
+      } catch (err: any) {
+        console.error("Error loading my bricks:", err);
+        setError(err.message ?? "Failed to load bricks.");
+      } finally {
+        setLoading(false);
+      }
     };
+
     load();
   }, [user]);
 
   if (!user) {
     return (
-      <div className="mx-auto flex min-h-[calc(100vh-64px)] max-w-2xl flex-col items-center justify-center px-4 text-center">
-        <h1 className="mb-3 text-2xl font-bold text-slate-900 sm:text-3xl">
-          You’re not logged in
+      <div className="mx-auto flex h-[calc(100vh-64px)] max-w-3xl flex-col items-center justify-center px-4 text-center">
+        <h1 className="text-xl font-bold text-slate-900">
+          Log in to view your bricks
         </h1>
-        <p className="mb-5 text-sm text-slate-600 sm:text-base">
-          Log in to see the bricks you own, edit your messages, and show off
-          your questionable investments.
+        <p className="mt-2 text-sm text-slate-600">
+          You need to be logged in with the same account you used to buy your bricks.
         </p>
-        <Link
-          to="/login"
-          className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
-        >
-          Go to login
-        </Link>
       </div>
     );
   }
 
-  return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-8">
-      <h1 className="mb-2 text-center text-2xl font-bold text-slate-900 sm:text-3xl">
-        My bricks
-      </h1>
-      <p className="mb-6 text-center text-sm text-slate-600 sm:text-base">
-        All the bricks you&apos;ve claimed on the wall. You&apos;re basically a
-        digital landlord now.
-      </p>
+  if (loading) {
+    return (
+      <div className="flex h-[calc(100vh-64px)] items-center justify-center text-slate-600">
+        Loading your bricks...
+      </div>
+    );
+  }
 
-      {loading ? (
-        <p className="text-center text-sm text-slate-500">Loading bricks…</p>
-      ) : bricks.length === 0 ? (
-        <div className="mx-auto max-w-md rounded-2xl bg-white/80 p-5 text-center text-sm text-slate-700 shadow">
-          <p className="mb-3">
-            You don&apos;t own any bricks yet. This is tragic but fixable.
+  const userIdShort = `${user.id.slice(0, 6)}…${user.id.slice(-6)}`;
+
+  return (
+    <div className="mx-auto flex w-full max-w-3xl flex-col px-4 py-8">
+      <div className="mb-4 rounded-2xl bg-white/90 p-4 shadow">
+        <h1 className="text-lg font-bold text-slate-900">Your bricks</h1>
+        <p className="mt-1 text-xs text-slate-600">
+          Logged in as <span className="font-semibold">{user.email}</span>
+        </p>
+        <p className="mt-1 text-[11px] text-slate-500">
+          Supabase user id:{" "}
+          <span className="font-mono">{userIdShort}</span>
+        </p>
+        <p className="mt-1 text-xs text-slate-600">
+          We&apos;re showing all bricks where <code>owner_id</code> equals this user id.
+        </p>
+      </div>
+
+      {error && (
+        <div className="mb-4 rounded-xl bg-red-50 p-3 text-xs text-red-600">
+          {error}
+        </div>
+      )}
+
+      {bricks.length === 0 ? (
+        <div className="rounded-2xl bg-white/90 p-4 text-sm text-slate-700 shadow">
+          <p className="font-semibold">You don&apos;t own any bricks (yet).</p>
+          <p className="mt-1 text-xs text-slate-500">
+            If you previously bought bricks under a different login (for example a
+            different Google account or a magic-link email), log out and sign in with
+            that same account to see them here.
           </p>
-          <Link
-            to="/wall#buy"
-            className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
-          >
-            Buy your first brick
-          </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {bricks.map((brick) => {
-            const colorClass =
-              brick.color === "yellow"
-                ? "bg-brickYellow"
-                : brick.color === "blue"
-                ? "bg-brickBlue"
-                : brick.color === "pink"
-                ? "bg-brickPink"
-                : brick.color === "green"
-                ? "bg-brickGreen"
-                : "bg-brickOrange";
+        <div className="space-y-3">
+          {bricks.map((b) => {
+            const x = b.brick_index % WALL_WIDTH;
+            const y = Math.floor(b.brick_index / WALL_WIDTH);
 
             return (
               <div
-                key={brick.id}
-                className="flex flex-col rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm"
+                key={b.id}
+                className="flex gap-3 rounded-2xl bg-white/90 p-3 text-xs text-slate-800 shadow"
               >
                 <div
-                  className={`mb-3 h-16 w-full rounded-brick ${colorClass} shadow-inner`}
+                  className="mt-1 h-10 w-20 rounded-brick shadow-inner"
+                  style={{ backgroundColor: b.color || "#FFD352" }}
                 />
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Brick #{brick.brick_index}
-                </div>
-                {brick.message ? (
-                  <p className="mb-3 text-sm text-slate-800">
-                    {brick.message}
-                  </p>
-                ) : (
-                  <p className="mb-3 text-sm italic text-slate-500">
-                    No message. Silent but deadly.
-                  </p>
-                )}
-
-                <div className="mt-auto space-y-2 text-[11px] text-slate-600">
-                  <p className="font-semibold text-slate-700">
-                    Linked socials:
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {brick.facebook_url && (
-                      <a
-                        href={brick.facebook_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 hover:bg-slate-200"
-                      >
-                        <span>📘</span>
-                        <span>Facebook</span>
-                      </a>
-                    )}
-                    {brick.instagram_url && (
-                      <a
-                        href={brick.instagram_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 hover:bg-slate-200"
-                      >
-                        <span>📸</span>
-                        <span>Instagram</span>
-                      </a>
-                    )}
-                    {brick.youtube_url && (
-                      <a
-                        href={brick.youtube_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 hover:bg-slate-200"
-                      >
-                        <span>▶️</span>
-                        <span>YouTube</span>
-                      </a>
-                    )}
-                    {brick.tiktok_url && (
-                      <a
-                        href={brick.tiktok_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 hover:bg-slate-200"
-                      >
-                        <span>🎵</span>
-                        <span>TikTok</span>
-                      </a>
-                    )}
-                    {brick.x_url && (
-                      <a
-                        href={brick.x_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 hover:bg-slate-200"
-                      >
-                        <span>𝕏</span>
-                        <span>X / Twitter</span>
-                      </a>
-                    )}
-                    {!brick.facebook_url &&
-                      !brick.instagram_url &&
-                      !brick.youtube_url &&
-                      !brick.tiktok_url &&
-                      !brick.x_url && (
-                        <span className="text-slate-400">
-                          No socials linked yet.
-                        </span>
-                      )}
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-center justify-between gap-1">
+                    <div className="font-semibold">
+                      Brick #{b.brick_index} (x={x}, y={y})
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      owner_id:{" "}
+                      <span className="font-mono">
+                        {b.owner_id
+                          ? `${b.owner_id.slice(0, 6)}…${b.owner_id.slice(-6)}`
+                          : "null"}
+                      </span>
+                    </div>
                   </div>
+                  {b.message && (
+                    <p className="mt-1 text-[11px] text-slate-700 line-clamp-3">
+                      {b.message}
+                    </p>
+                  )}
                 </div>
               </div>
             );

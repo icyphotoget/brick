@@ -45,6 +45,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const onWallPage = location.pathname === "/wall";
+  const onMyBricksPage = location.pathname === "/my-bricks";
+
   const handleLogout = async () => {
     try {
       await signOut();
@@ -58,9 +61,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
     navigate("/wall#buy");
   };
 
-  const onWallPage = location.pathname === "/wall";
-
-  // Small helper for the auth button
   const AuthButton = () =>
     user ? (
       <button
@@ -102,6 +102,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
           {/* Right: links + actions */}
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* View wall link */}
             <Link
               to="/wall"
               className={`hidden sm:inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold ${
@@ -113,10 +114,24 @@ export default function AppLayout({ children }: AppLayoutProps) {
               View wall
             </Link>
 
-            {/* Modern wallet select button */}
+            {/* My bricks link – only when logged in */}
+            {user && (
+              <Link
+                to="/my-bricks"
+                className={`hidden sm:inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold ${
+                  onMyBricksPage
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-700 hover:bg-white/60"
+                }`}
+              >
+                My bricks
+              </Link>
+            )}
+
+            {/* Wallet connect */}
             <WalletConnectButton />
 
-            {/* Auth button (login / logout) */}
+            {/* Auth button */}
             <AuthButton />
 
             {/* Primary CTA: Buy a brick */}
