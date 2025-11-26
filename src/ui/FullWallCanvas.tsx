@@ -1,386 +1,298 @@
 // src/ui/FullWallCanvas.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
-
-const WALL_WIDTH = 1000;
-const WALL_HEIGHT = 1000;
+import React, { useEffect, useRef, useState } from "react";
+import ZoomControls from "./ZoomControls";
 
 export type SoldBrick = {
   brick_index: number;
   color: string;
 };
 
-type FullWallCanvasProps = {
+type Props = {
   soldBricks: SoldBrick[];
-  onBrickClick?: (brickIndex: number, x: number, y: number) => void;
+  onBrickClick: (brickIndex: number, x: number, y: number) => void;
   onBrickHover?: (brickIndex: number | null) => void;
   highlightedBrickIndexes?: number[];
 };
 
-type LayoutInfo = {
-  width: number;
-  height: number;
-  cellSize: number;
-  offsetX: number;
-  offsetY: number;
-};
+const WALL_WIDTH = 1000;
+const WALL_HEIGHT = 1000;
+const BRICK_SIZE = 16;
 
 export default function FullWallCanvas({
   soldBricks,
   onBrickClick,
   onBrickHover,
   highlightedBrickIndexes = [],
-}: FullWallCanvasProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const [size, setSize] = useState({ width: 0, height: 0 });
-  const [layout, setLayout] = useState<LayoutInfo | null>(null);
+  const [scale, setScale] = useState(1);
+  const [minScale, setMinScale] = useState(0.1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
 
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragged, setDragged] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const offsetStart = useRef({ x: 0, y: 0 });
 
-  const isPanning = useRef(false);
-  const lastPos = useRef({ x: 0, y: 0 });
-  const didDrag = useRef(false);
+  const lastPointer = useRef({ x: 0, y: 0 });
 
-  const [hoverBrick, setHoverBrick] = useState<number | null>(null);
-
-  const isPinching = useRef(false);
-  const pinchStartDistance = useRef(0);
-  const pinchStartZoom = useRef(1);
-
-  const soldMap = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const b of soldBricks) map.set(b.brick_index, b.color);
-    return map;
-  }, [soldBricks]);
-
+  // ---------------- CALCULATE MIN SCALE (fit whole wall) ----------------
   useEffect(() => {
-    const cont = containerRef.current;
-    if (!cont) return;
+    const updateMinScale = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
 
-    const resize = () => {
-      const rect = cont.getBoundingClientRect();
-      setSize({ width: rect.width, height: rect.height });
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+
+      const wallPixelWidth = WALL_WIDTH * BRICK_SIZE;
+      const wallPixelHeight = WALL_HEIGHT * BRICK_SIZE;
+
+      const scaleX = width / wallPixelWidth;
+      const scaleY = height / wallPixelHeight;
+      const newMinScale = Math.min(scaleX, scaleY);
+
+      setMinScale(newMinScale);
+
+      // Ensure we never go below the min scale
+      setScale((prev) => Math.max(prev, newMinScale));
+
+      // Center the wall (only depends on scale, so OK to recalc)
+      const wallWidthScaled = wallPixelWidth * Math.max(scale, newMinScale);
+      const wallHeightScaled = wallPixelHeight * Math.max(scale, newMinScale);
+
+      const newOffset = {
+        x: (width - wallWidthScaled) / 2,
+        y: (height - wallHeightScaled) / 2,
+      };
+
+      setOffset((prev) => {
+        // if previous offset is 0, we're probably initialising – center
+        if (prev.x === 0 && prev.y === 0) return newOffset;
+        return prev;
+      });
     };
 
-    resize();
-    window.addEventListener("resize", resize);
-    return () => window.removeEventListener("resize", resize);
-  }, []);
+    updateMinScale();
+    window.addEventListener("resize", updateMinScale);
+    return () => window.removeEventListener("resize", updateMinScale);
+  }, [scale]);
 
-  const clampZoom = (z: number) => Math.min(12, Math.max(0.5, z));
-
-  useEffect(() => {
-    if (size.width === 0 || size.height === 0) return;
-
-    const shortestSide = Math.min(size.width, size.height);
-    const baseCell =
-      shortestSide < 600
-        ? Math.max(3, Math.floor(shortestSide / 200))
-        : Math.max(2, Math.floor(shortestSide / 300));
-
-    const cellSize = baseCell * zoom;
-    const wallW = cellSize * WALL_WIDTH;
-    const wallH = cellSize * WALL_HEIGHT;
-
-    const offsetX = (size.width - wallW) / 2 + pan.x;
-    const offsetY = (size.height - wallH) / 2 + pan.y;
-
-    setLayout({
-      width: size.width,
-      height: size.height,
-      cellSize,
-      offsetX,
-      offsetY,
-    });
-  }, [size, zoom, pan]);
-
+  // ---------------- DRAW WALL ----------------
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !layout) return;
+    if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = layout.width * dpr;
-    canvas.height = layout.height * dpr;
+    const pixelRatio = window.devicePixelRatio || 1;
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
 
-    ctx.resetTransform();
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, layout.width, layout.height);
+    canvas.width = width * pixelRatio;
+    canvas.height = height * pixelRatio;
+    ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
 
-    const { width, height, cellSize, offsetX, offsetY } = layout;
+    ctx.clearRect(0, 0, width, height);
 
-    ctx.fillStyle = "#E0F2FE";
+    const brickSize = BRICK_SIZE * scale;
+
+    // Background color (same as page)
+    ctx.fillStyle = "#CDE6F5";
     ctx.fillRect(0, 0, width, height);
 
-    const startXIndex = Math.max(0, Math.floor(-offsetX / cellSize));
-    const endXIndex = Math.min(
-      WALL_WIDTH,
-      Math.ceil((width - offsetX) / cellSize)
-    );
-    const startYIndex = Math.max(0, Math.floor(-offsetY / cellSize));
-    const endYIndex = Math.min(
-      WALL_HEIGHT,
-      Math.ceil((height - offsetY) / cellSize)
-    );
+    // Grid lines
+    ctx.strokeStyle = "rgba(0,0,0,0.06)";
+    ctx.lineWidth = 1;
 
-    // grid
-    ctx.beginPath();
-    ctx.strokeStyle = "rgba(148, 163, 184, 0.25)";
-    ctx.lineWidth = 0.5;
+    const cols = Math.ceil(width / brickSize) + 2;
+    const rows = Math.ceil(height / brickSize) + 2;
 
-    for (let xIdx = startXIndex; xIdx <= endXIndex; xIdx++) {
-      const x = offsetX + xIdx * cellSize;
-      ctx.moveTo(x, offsetY + startYIndex * cellSize);
-      ctx.lineTo(x, offsetY + endYIndex * cellSize);
+    for (let i = -1; i < cols; i++) {
+      const x = i * brickSize + (offset.x % brickSize);
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, height);
+      ctx.stroke();
     }
 
-    for (let yIdx = startYIndex; yIdx <= endYIndex; yIdx++) {
-      const y = offsetY + yIdx * cellSize;
-      ctx.moveTo(offsetX + startXIndex * cellSize, y);
-      ctx.lineTo(offsetX + endXIndex * cellSize, y);
+    for (let i = -1; i < rows; i++) {
+      const y = i * brickSize + (offset.y % brickSize);
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
     }
 
-    ctx.stroke();
+    // Draw sold bricks
+    for (const brick of soldBricks) {
+      const idx = brick.brick_index;
+      const xIndex = idx % WALL_WIDTH;
+      const yIndex = Math.floor(idx / WALL_WIDTH);
 
-    // sold bricks
-    for (const [brickIndex, color] of soldMap.entries()) {
-      const xIdx = brickIndex % WALL_WIDTH;
-      const yIdx = Math.floor(brickIndex / WALL_WIDTH);
+      const x = xIndex * brickSize + offset.x;
+      const y = yIndex * brickSize + offset.y;
 
-      if (
-        xIdx < startXIndex ||
-        xIdx > endXIndex ||
-        yIdx < startYIndex ||
-        yIdx > endYIndex
-      ) {
-        continue;
+      ctx.fillStyle = brick.color || "#FFD352";
+      ctx.fillRect(x, y, brickSize, brickSize);
+    }
+
+    // Highlight user bricks
+    if (highlightedBrickIndexes.length) {
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = "#22C55E";
+
+      for (const idx of highlightedBrickIndexes) {
+        const xIndex = idx % WALL_WIDTH;
+        const yIndex = Math.floor(idx / WALL_WIDTH);
+
+        const x = xIndex * brickSize + offset.x;
+        const y = yIndex * brickSize + offset.y;
+
+        ctx.fillRect(x, y, brickSize, brickSize);
       }
 
-      const x = offsetX + xIdx * cellSize;
-      const y = offsetY + yIdx * cellSize;
-
-      ctx.fillStyle = color;
-      ctx.fillRect(
-        x + 0.5,
-        y + 0.5,
-        cellSize - 1,
-        cellSize - 1
-      );
+      ctx.globalAlpha = 1;
     }
-  }, [layout, soldMap]);
+  }, [soldBricks, scale, offset, highlightedBrickIndexes]);
 
-  const computeBrickIndexFromPoint = (clientX: number, clientY: number) => {
+  // ---------------- HELPERS ----------------
+  const getBrickIndexFromPoint = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
-    if (!canvas || !layout) return null;
+    if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    const px = clientX - rect.left;
-    const py = clientY - rect.top;
 
-    const { cellSize, offsetX, offsetY } = layout;
-    const gx = Math.floor((px - offsetX) / cellSize);
-    const gy = Math.floor((py - offsetY) / cellSize);
+    const brickSize = BRICK_SIZE * scale;
+    const xCoord = (clientX - rect.left - offset.x) / brickSize;
+    const yCoord = (clientY - rect.top - offset.y) / brickSize;
 
-    if (gx < 0 || gx >= WALL_WIDTH || gy < 0 || gy >= WALL_HEIGHT) return null;
+    const bx = Math.floor(xCoord);
+    const by = Math.floor(yCoord);
+    if (bx < 0 || by < 0 || bx >= WALL_WIDTH || by >= WALL_HEIGHT) return null;
 
-    const brickIndex = gy * WALL_WIDTH + gx;
-    return { brickIndex, x: gx, y: gy };
+    const index = by * WALL_WIDTH + bx;
+    return { index, x: bx, y: by };
   };
 
-  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (didDrag.current) {
-      return;
-    }
-    if (!onBrickClick) return;
-    const info = computeBrickIndexFromPoint(e.clientX, e.clientY);
-    if (!info) return;
-    onBrickClick(info.brickIndex, info.x, info.y);
+  // ---------------- DRAGGING ----------------
+  const startDrag = (clientX: number, clientY: number) => {
+    setIsDragging(true);
+    setDragged(false);
+    dragStart.current = { x: clientX, y: clientY };
+    offsetStart.current = { ...offset };
+    lastPointer.current = { x: clientX, y: clientY };
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isPanning.current) {
-      const dx = e.clientX - lastPos.current.x;
-      const dy = e.clientY - lastPos.current.y;
-      lastPos.current = { x: e.clientX, y: e.clientY };
-      setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
-        didDrag.current = true;
-      }
-      return;
+  const doDrag = (clientX: number, clientY: number) => {
+    if (!isDragging) return;
+
+    lastPointer.current = { x: clientX, y: clientY };
+
+    const dx = clientX - dragStart.current.x;
+    const dy = clientY - dragStart.current.y;
+
+    if (!dragged && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+      setDragged(true); // user is actually dragging
     }
 
-    const info = computeBrickIndexFromPoint(e.clientX, e.clientY);
-    const idx = info?.brickIndex ?? null;
-    setHoverBrick(idx);
-    onBrickHover?.(idx);
+    setOffset({
+      x: offsetStart.current.x + dx,
+      y: offsetStart.current.y + dy,
+    });
+  };
+
+  const stopDragAndMaybeClick = () => {
+    setIsDragging(false);
+
+    // If user moved more than threshold, don't treat as click
+    if (dragged) return;
+
+    // Interpret as a click at last pointer position
+    const { x, y } = lastPointer.current;
+    const brickInfo = getBrickIndexFromPoint(x, y);
+    if (!brickInfo) return;
+
+    onBrickClick(brickInfo.index, brickInfo.x, brickInfo.y);
+  };
+
+  // ---------------- MOUSE EVENTS ----------------
+  const handleMouseDown = (e: React.MouseEvent) => {
+    startDrag(e.clientX, e.clientY);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    doDrag(e.clientX, e.clientY);
+
+    if (onBrickHover) {
+      const info = getBrickIndexFromPoint(e.clientX, e.clientY);
+      onBrickHover(info ? info.index : null);
+    }
+  };
+
+  const handleMouseUp = () => {
+    stopDragAndMaybeClick();
   };
 
   const handleMouseLeave = () => {
-    setHoverBrick(null);
-    onBrickHover?.(null);
+    setIsDragging(false);
+    setDragged(false);
+    if (onBrickHover) onBrickHover(null);
   };
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    isPanning.current = true;
-    didDrag.current = false;
-    lastPos.current = { x: e.clientX, y: e.clientY };
+  // ---------------- TOUCH EVENTS ----------------
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    if (!t) return;
+    startDrag(t.clientX, t.clientY);
   };
 
-  useEffect(() => {
-    const stop = () => {
-      isPanning.current = false;
-    };
-    window.addEventListener("mouseup", stop);
-    window.addEventListener("touchend", stop);
-    window.addEventListener("touchcancel", stop);
-    return () => {
-      window.removeEventListener("mouseup", stop);
-      window.removeEventListener("touchend", stop);
-      window.removeEventListener("touchcancel", stop);
-    };
-  }, []);
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    if (!t) return;
+    doDrag(t.clientX, t.clientY);
 
-  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setZoom((z) => clampZoom(z * (e.deltaY > 0 ? 0.9 : 1.1)));
-  };
-
-  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (e.touches.length === 1) {
-      const t = e.touches[0];
-      isPanning.current = true;
-      didDrag.current = false;
-      lastPos.current = { x: t.clientX, y: t.clientY };
-    } else if (e.touches.length === 2) {
-      const [t1, t2] = [e.touches[0], e.touches[1]];
-      const dx = t2.clientX - t1.clientX;
-      const dy = t2.clientY - t1.clientY;
-      const dist = Math.hypot(dx, dy);
-      isPinching.current = true;
-      pinchStartDistance.current = dist;
-      pinchStartZoom.current = zoom;
-    }
-  };
-
-  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (e.touches.length === 1 && !isPinching.current) {
-      e.preventDefault();
-      const t = e.touches[0];
-      const dx = t.clientX - lastPos.current.x;
-      const dy = t.clientY - lastPos.current.y;
-      lastPos.current = { x: t.clientX, y: t.clientY };
-      setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
-        didDrag.current = true;
-      }
-    } else if (e.touches.length === 2) {
-      e.preventDefault();
-      const [t1, t2] = [e.touches[0], e.touches[1]];
-      const dx = t2.clientX - t1.clientX;
-      const dy = t2.clientY - t1.clientY;
-      const dist = Math.hypot(dx, dy);
-
-      if (!pinchStartDistance.current) {
-        pinchStartDistance.current = dist;
-        pinchStartZoom.current = zoom;
-      }
-
-      if (pinchStartDistance.current) {
-        const factor = dist / pinchStartDistance.current;
-        const targetZoom = clampZoom(pinchStartZoom.current * factor);
-        setZoom(targetZoom);
-      }
+    if (onBrickHover) {
+      const info = getBrickIndexFromPoint(t.clientX, t.clientY);
+      onBrickHover(info ? info.index : null);
     }
   };
 
   const handleTouchEnd = () => {
-    isPinching.current = false;
-    pinchStartDistance.current = 0;
+    stopDragAndMaybeClick();
   };
 
-  const overlays: { key: string; brickIndex: number; isMine?: boolean }[] = [];
-  for (const idx of highlightedBrickIndexes) {
-    overlays.push({ key: `mine-${idx}`, brickIndex: idx, isMine: true });
-  }
-  if (hoverBrick != null) {
-    overlays.push({ key: `hover-${hoverBrick}`, brickIndex: hoverBrick });
-  }
+  // ---------------- ZOOM ----------------
+  const zoomIn = () => setScale((s) => Math.min(4, s + 0.2));
+  const zoomOut = () =>
+    setScale((s) => {
+      const next = s - 0.2;
+      return next < minScale ? minScale : next;
+    });
 
+  const handleWheel = (e: React.WheelEvent) => {
+    if (e.deltaY < 0) zoomIn();
+    else zoomOut();
+  };
+
+  // ---------------- RENDER ----------------
   return (
-    <div
-      ref={containerRef}
-      className="relative h-full w-full bg-sky touch-none canvas-non-passive"
-      onWheel={handleWheel}
-    >
+    <div className="relative h-full w-full touch-none overflow-hidden">
+      {/* Top-right zoom controls */}
+      <ZoomControls onZoomIn={zoomIn} onZoomOut={zoomOut} />
+
       <canvas
         ref={canvasRef}
-        className="h-full w-full cursor-crosshair"
-        onClick={handleClick}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
+        className="h-full w-full cursor-grab active:cursor-grabbing"
         onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
+        onWheel={handleWheel}
       />
-
-      <div className="pointer-events-auto absolute bottom-3 right-3 flex flex-col gap-1 rounded-full bg-white/80 p-1 shadow">
-        <button
-          type="button"
-          className="rounded-full px-2 text-xs font-bold text-slate-800"
-          onClick={() => setZoom((z) => clampZoom(z * 1.3))}
-        >
-          +
-        </button>
-        <button
-          type="button"
-          className="rounded-full px-2 text-xs font-bold text-slate-800"
-          onClick={() => setZoom((z) => clampZoom(z / 1.3))}
-        >
-          −
-        </button>
-        <button
-          type="button"
-          className="rounded-full px-2 text-[10px] font-medium text-slate-600"
-          onClick={() => {
-            setZoom(1);
-            setPan({ x: 0, y: 0 });
-          }}
-        >
-          reset
-        </button>
-      </div>
-
-      {layout &&
-        overlays.map((o) => {
-          const { cellSize, offsetX, offsetY } = layout;
-          const xIdx = o.brickIndex % WALL_WIDTH;
-          const yIdx = Math.floor(o.brickIndex / WALL_WIDTH);
-
-          const left = offsetX + xIdx * cellSize;
-          const top = offsetY + yIdx * cellSize;
-          const sizePx = cellSize;
-
-          const border = o.isMine
-            ? "border border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)]"
-            : "border-2 border-slate-900";
-
-          return (
-            <div
-              key={o.key}
-              className={`pointer-events-none absolute rounded-sm ${border}`}
-              style={{
-                left,
-                top,
-                width: sizePx,
-                height: sizePx,
-              }}
-            />
-          );
-        })}
     </div>
   );
 }
