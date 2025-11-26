@@ -1,144 +1,158 @@
 // src/ui/AppLayout.tsx
-import React from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import React, { useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 
-type AppLayoutProps = {
+type Props = {
   children: React.ReactNode;
 };
 
-function WalletConnectButton() {
-  const { publicKey, connected } = useWallet();
-  const { setVisible } = useWalletModal();
-
-  const handleClick = () => {
-    setVisible(true);
-  };
-
-  const shortAddress =
-    connected && publicKey
-      ? `${publicKey.toBase58().slice(0, 4)}…${publicKey
-          .toBase58()
-          .slice(-4)}`
-      : null;
-
-  return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm backdrop-blur hover:border-slate-500 hover:bg-white transition"
-    >
-      <span
-        className={`h-2 w-2 rounded-full ${
-          connected ? "bg-emerald-400" : "bg-slate-300"
-        }`}
-      />
-      <span>{shortAddress ?? "Select wallet"}</span>
-    </button>
-  );
+function shortenPubkey(pk: string) {
+  return pk.slice(0, 4) + "…" + pk.slice(-4);
 }
 
-export default function AppLayout({ children }: AppLayoutProps) {
-  const { user, signOut } = useAuth();
+export default function AppLayout({ children }: Props) {
+  const { user, signOut, signInWithGoogle } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const onWallPage = location.pathname === "/wall";
-  const onMyBricksPage = location.pathname === "/my-bricks";
+  const { publicKey, connected } = useWallet();
+  const { setVisible } = useWalletModal();
 
-  const handleLogout = async () => {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const handleGoogleLogin = async () => {
     try {
-      await signOut();
-      navigate("/");
+      await signInWithGoogle();
     } catch (err: any) {
-      alert("Logout failed: " + err.message);
+      alert("Google login failed: " + err.message);
     }
   };
 
-  const handleBuyClick = () => {
+  const handleBuyBrick = () => {
     navigate("/wall#buy");
+    setMenuOpen(false);
   };
 
-  const AuthButton = () =>
-    user ? (
-      <button
-        type="button"
-        onClick={handleLogout}
-        className="rounded-full bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm hover:bg-white"
-      >
-        Log out
-      </button>
-    ) : (
-      <button
-        type="button"
-        onClick={() => navigate("/login")}
-        className="rounded-full bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm hover:bg-white"
-      >
-        Log in
-      </button>
-    );
+  const handleMyBricks = () => {
+    navigate("/my-bricks");
+    setMenuOpen(false);
+  };
+
+  const handleLogoClick = () => {
+    if (location.pathname === "/") return;
+    navigate("/");
+  };
+
+  const handleWalletClick = () => {
+    setVisible(true);
+    setMenuOpen(false);
+  };
+
+  const topButtonBase =
+    "inline-flex items-center gap-1 rounded-full border border-white/70 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-900 shadow-sm hover:bg-white";
+
+  let menuLabel: string;
+  if (user?.email) {
+    menuLabel = user.email.split("@")[0]; // part before @
+  } else if (connected && publicKey) {
+    menuLabel = shortenPubkey(publicKey.toBase58());
+  } else {
+    menuLabel = "Menu";
+  }
+
+  const handleToggleMenu = () => {
+    setMenuOpen((open) => !open);
+  };
 
   return (
     <div className="min-h-screen bg-sky flex flex-col">
-      {/* NAVBAR */}
       <header className="w-full border-b border-white/40 bg-sky/80 backdrop-blur">
         <nav className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-          {/* Left: logo */}
-          <Link to="/" className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brickYellow shadow-sm">
-              <span className="text-xs font-black text-slate-900">🧱</span>
-            </div>
-            <div className="flex flex-col leading-tight">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+          {/* LOGO */}
+          <button
+            type="button"
+            onClick={handleLogoClick}
+            className="flex items-center gap-2 rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-slate-900 shadow-sm hover:bg-white"
+          >
+            <span className="h-6 w-6 rounded-full bg-brickYellow" />
+            <div className="flex flex-col leading-none">
+              <span className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
                 THE INTERNET
               </span>
-              <span className="text-sm font-bold text-slate-900">
-                Brick Wall
-              </span>
+              <span className="text-xs font-bold">Brick Wall</span>
             </div>
-          </Link>
+          </button>
 
-          {/* Right: links + actions */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            {/* View wall link */}
-            <Link
-              to="/wall"
-              className={`hidden sm:inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold ${
-                onWallPage
-                  ? "bg-white text-slate-900 shadow-sm"
-                  : "text-slate-700 hover:bg-white/60"
-              }`}
-            >
-              View wall
-            </Link>
-
-            {/* My bricks link – only when logged in */}
-            {user && (
-              <Link
-                to="/my-bricks"
-                className={`hidden sm:inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold ${
-                  onMyBricksPage
-                    ? "bg-white text-slate-900 shadow-sm"
-                    : "text-slate-700 hover:bg-white/60"
-                }`}
+          {/* RIGHT SIDE ACTIONS */}
+          <div className="flex items-center gap-2">
+            {/* Single menu button with dropdown */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={handleToggleMenu}
+                className={topButtonBase}
               >
-                My bricks
-              </Link>
-            )}
+                <span className="text-sm">☰</span>
+                <span>{menuLabel}</span>
+              </button>
 
-            {/* Wallet connect */}
-            <WalletConnectButton />
+              {menuOpen && (
+                <div className="absolute right-0 z-50 mt-2 w-40 rounded-2xl border border-white/70 bg-white/95 py-2 text-xs text-slate-800 shadow-lg">
+                  {user && (
+                    <button
+                      type="button"
+                      onClick={handleMyBricks}
+                      className="flex w-full items-center px-3 py-1.5 text-left hover:bg-slate-50"
+                    >
+                      🧱 My bricks
+                    </button>
+                  )}
 
-            {/* Auth button */}
-            <AuthButton />
+                  <button
+                    type="button"
+                    onClick={handleWalletClick}
+                    className="flex w-full items-center px-3 py-1.5 text-left hover:bg-slate-50"
+                  >
+                    💼 Select wallet
+                  </button>
 
-            {/* Primary CTA: Buy a brick */}
+                  <div className="my-1 h-px bg-slate-100" />
+
+                  {user ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        signOut();
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center px-3 py-1.5 text-left text-red-500 hover:bg-slate-50"
+                    >
+                      ⎋ Log out
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await handleGoogleLogin();
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center px-3 py-1.5 text-left hover:bg-slate-50"
+                    >
+                      🔑 Log in
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Primary CTA */}
             <button
               type="button"
-              onClick={handleBuyClick}
-              className="inline-flex items-center rounded-full bg-slate-900 px-4 py-2 text-xs sm:text-sm font-semibold text-white shadow-md hover:bg-slate-800"
+              onClick={handleBuyBrick}
+              className="ml-1 inline-flex items-center rounded-full bg-brickYellow px-4 py-1.5 text-xs font-semibold text-slate-900 shadow-md hover:brightness-105"
             >
               Buy a brick
             </button>
@@ -146,7 +160,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
         </nav>
       </header>
 
-      {/* Page content */}
       <main className="flex-1">{children}</main>
     </div>
   );
