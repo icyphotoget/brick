@@ -56,7 +56,7 @@ export default function AppLayout({ children }: Props) {
 
   let menuLabel: string;
   if (user?.email) {
-    menuLabel = user.email.split("@")[0]; // part before @
+    menuLabel = user.email.split("@")[0];
   } else if (connected && publicKey) {
     menuLabel = shortenPubkey(publicKey.toBase58());
   } else {
@@ -69,7 +69,8 @@ export default function AppLayout({ children }: Props) {
 
   return (
     <div className="min-h-screen bg-sky flex flex-col">
-      <header className="w-full border-b border-white/40 bg-sky/80 backdrop-blur">
+      {/* 🔼 add relative + z-30 so header (and dropdown) stay above wall */}
+      <header className="relative z-30 w-full border-b border-white/40 bg-sky/80 backdrop-blur">
         <nav className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
           {/* LOGO */}
           <button
@@ -88,7 +89,6 @@ export default function AppLayout({ children }: Props) {
 
           {/* RIGHT SIDE ACTIONS */}
           <div className="flex items-center gap-2">
-            {/* Primary CTA - now on the left side of the pair */}
             <button
               type="button"
               onClick={handleBuyBrick}
@@ -97,7 +97,6 @@ export default function AppLayout({ children }: Props) {
               Buy a brick
             </button>
 
-            {/* Single menu button with dropdown - now on the right */}
             <div className="relative ml-1">
               <button
                 type="button"
