@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import FullWallCanvas, { SoldBrick } from "../ui/FullWallCanvas";
@@ -21,131 +21,182 @@ type ReserveResponse = {
     youtube_url?: string | null;
     tiktok_url?: string | null;
     x_url?: string | null;
-  } | null;
-  order: {
-    id: string;
-    status: string;
-    total_usd_cents: number;
-  } | null;
+  };
+};
+
+type WallBrick = {
+  id: number;
+  brick_index: number;
+  color: string;
+  message: string | null;
+  facebook_url: string | null;
+  instagram_url: string | null;
+  youtube_url: string | null;
+  tiktok_url: string | null;
+  x_url: string | null;
+  owner_id: string | null;
 };
 
 export default function WallPage() {
   const location = useLocation();
   const { user } = useAuth();
 
-  const [soldBricks, setSoldBricks] = useState<SoldBrick[]>([]);
   const [loadingWall, setLoadingWall] = useState(true);
+  const [bricks, setBricks] = useState<WallBrick[]>([]);
+  const [soldBricks, setSoldBricks] = useState<SoldBrick[]>([]);
 
   const [buyOpen, setBuyOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
   const [selectedBrickIndex, setSelectedBrickIndex] = useState<number | null>(
     null
   );
+  const [selectedCoords, setSelectedCoords] = useState<{ x: number; y: number } | null>(
+    null
+  );
+  const [selectedBrickDetails, setSelectedBrickDetails] = useState<WallBrick | null>(
+    null
+  );
 
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [selectedBrickDetails, setSelectedBrickDetails] =
-    useState<ReserveResponse["brick"] | null>(null);
-
-  const [hoverBrickIndex, setHoverBrickIndex] = useState<number | null>(null);
-
-  const [myBrickIndexes, setMyBrickIndexes] = useState<number[]>([]);
+  const [hoveredBrickIndex, setHoveredBrickIndex] = useState<number | null>(null);
   const [highlightMyBricks, setHighlightMyBricks] = useState(false);
 
-  // učitaj sve prodane cigle (bojanje zida)
+  // Open buy modal when URL has #buy
   useEffect(() => {
-    const loadSoldBricks = async () => {
+    if (location.hash === "#buy") {
+      setBuyOpen(true);
+    }
+  }, [location.hash]);
+
+  // Initial load of sold bricks
+  useEffect(() => {
+    const loadSold = async () => {
+      setLoadingWall(true);
       const { data, error } = await supabase
         .from("bricks")
         .select(
-          "brick_index, color"
+          "id, brick_index, color, message, facebook_url, instagram_url, youtube_url, tiktok_url, x_url, owner_id, status"
         )
-        .eq("status", "sold");
+        .eq("status", "sold")
+        .order("brick_index", { ascending: true })
+        .limit(20000);
 
       if (error) {
-        console.error(error);
+        console.error("Error loading wall:", error);
         alert("Error loading wall: " + error.message);
-      } else {
-        const mapped: SoldBrick[] =
-          (data ?? []).map((b: any) => ({
-            brick_index: b.brick_index,
-            color: b.color || "#FFD352"
-          })) || [];
-        setSoldBricks(mapped);
-      }
-      setLoadingWall(false);
-    };
-
-    loadSoldBricks();
-  }, []);
-
-  // učitaj moje cigle
-  useEffect(() => {
-    if (!user) {
-      setMyBrickIndexes([]);
-      setHighlightMyBricks(false);
-      return;
-    }
-
-    const loadMyBricks = async () => {
-      const { data, error } = await supabase
-        .from("bricks")
-        .select("brick_index")
-        .eq("owner_id", user.id);
-
-      if (error) {
-        console.error(error);
+        setLoadingWall(false);
         return;
       }
 
-      setMyBrickIndexes(
-        (data ?? []).map((b: any) => b.brick_index as number)
+      const rows = (data ?? []) as any[];
+      const mappedBricks: WallBrick[] = rows.map((row) => ({
+        id: row.id,
+        brick_index: row.brick_index,
+        color: row.color || "#FFD352",
+        message: row.message ?? null,
+        facebook_url: row.facebook_url ?? null,
+        instagram_url: row.instagram_url ?? null,
+        youtube_url: row.youtube_url ?? null,
+        tiktok_url: row.tiktok_url ?? null,
+        x_url: row.x_url ?? null,
+        owner_id: row.owner_id ?? null,
+      }));
+
+      setBricks(mappedBricks);
+      setSoldBricks(
+        mappedBricks.map((b) => ({
+          brick_index: b.brick_index,
+          color: b.color,
+        }))
       );
+      setLoadingWall(false);
     };
 
-    loadMyBricks();
-  }, [user]);
+    loadSold();
+  }, []);
 
-  // ako dođeš na /wall?brick=123 možemo auto selektati tu ciglu (kasnije)
+  // Realtime updates for new sold bricks
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const brickParam = params.get("brick");
-    if (brickParam) {
-      const idx = parseInt(brickParam, 10);
-      if (!Number.isNaN(idx)) {
-        setSelectedBrickIndex(idx);
-      }
-    }
-  }, [location.search]);
+    const channel = supabase
+      .channel("bricks-realtime-wall")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bricks" },
+        (payload) => {
+          const newRow: any = payload.new;
+          if (!newRow) return;
+          if (newRow.status !== "sold") return;
 
-  const handleBrickClick = (brickIndex: number) => {
-    setSelectedBrickIndex(brickIndex);
+          const brickIndex = newRow.brick_index;
+          const color = newRow.color || "#FFD352";
 
-    // provjeri je li već sold – ako je, otvori detalje
-    const existing = soldBricks.find((b) => b.brick_index === brickIndex);
+          setBricks((prev) => {
+            const exists = prev.some((b) => b.brick_index === brickIndex);
+            const updated: WallBrick = {
+              id: newRow.id,
+              brick_index: brickIndex,
+              color,
+              message: newRow.message ?? null,
+              facebook_url: newRow.facebook_url ?? null,
+              instagram_url: newRow.instagram_url ?? null,
+              youtube_url: newRow.youtube_url ?? null,
+              tiktok_url: newRow.tiktok_url ?? null,
+              x_url: newRow.x_url ?? null,
+              owner_id: newRow.owner_id ?? null,
+            };
+            if (exists) {
+              return prev.map((b) =>
+                b.brick_index === brickIndex ? updated : b
+              );
+            }
+            return [...prev, updated];
+          });
+
+          setSoldBricks((prev) => {
+            if (prev.some((b) => b.brick_index === brickIndex)) return prev;
+            return [...prev, { brick_index: brickIndex, color }];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const myBrickIndexes = useMemo(() => {
+    if (!user) return [];
+    return bricks
+      .filter((b) => b.owner_id === user.id)
+      .map((b) => b.brick_index);
+  }, [bricks, user]);
+
+  const highlightedIndexes = highlightMyBricks ? myBrickIndexes : [];
+
+  const getCoords = (idx: number) => ({
+    x: idx % WALL_WIDTH,
+    y: Math.floor(idx / WALL_WIDTH),
+  });
+
+  const handleBrickClick = (brickIndex: number, x: number, y: number) => {
+    const existing = bricks.find((b) => b.brick_index === brickIndex);
     if (existing) {
-      // za detalje idealno dohvatiti real ciglu iz Supabase
-      setSelectedBrickDetails({
-        id: brickIndex,
-        brick_index: brickIndex,
-        x: brickIndex % WALL_WIDTH,
-        y: Math.floor(brickIndex / WALL_WIDTH),
-        color: existing.color,
-        message: null,
-        facebook_url: null,
-        instagram_url: null,
-        youtube_url: null,
-        tiktok_url: null,
-        x_url: null
-      });
+      setSelectedBrickDetails(existing);
       setDetailsOpen(true);
+      setSelectedBrickIndex(brickIndex);
+      setSelectedCoords({ x, y });
     } else {
-      // nova cigla za kupnju
+      setSelectedBrickIndex(brickIndex);
+      setSelectedCoords({ x, y });
       setBuyOpen(true);
+      setDetailsOpen(false);
     }
   };
 
   const handleComplete = async (values: BuyBrickFormValues) => {
     if (selectedBrickIndex == null) {
-      alert("Nema odabrane cigle.");
+      alert("No brick selected.");
       return;
     }
 
@@ -154,100 +205,100 @@ export default function WallPage() {
         "reserve_brick_and_create_order",
         {
           p_brick_index: selectedBrickIndex,
+          p_x: selectedCoords?.x ?? null,
+          p_y: selectedCoords?.y ?? null,
           p_color: values.color,
           p_message: values.message,
           p_facebook_url: values.facebook_url ?? null,
           p_instagram_url: values.instagram_url ?? null,
           p_youtube_url: values.youtube_url ?? null,
           p_tiktok_url: values.tiktok_url ?? null,
-          p_x_url: values.x_url ?? null
+          p_x_url: values.x_url ?? null,
+          p_is_gift: values.is_gift ?? false,
+          p_recipient_name: values.recipient_name ?? null,
+          p_recipient_email: values.recipient_email ?? null,
+          p_gift_note: values.gift_note ?? null,
         }
       );
 
       if (error) {
         console.error("Supabase error:", error);
-        alert("Greška pri kupnji cigle: " + error.message);
+        alert("Purchase failed: " + error.message);
         return;
       }
 
       if (!data || !data.brick) {
-        alert("Nešto je pošlo po zlu – nema vraćene cigle.");
+        alert("No brick returned from server.");
         return;
       }
 
       const brick = data.brick;
 
-      // dodaj u globalni zid
       setSoldBricks((prev) => {
         if (prev.some((b) => b.brick_index === brick.brick_index)) return prev;
         return [
           ...prev,
           {
             brick_index: brick.brick_index,
-            color: brick.color
-          }
+            color: brick.color,
+          },
         ];
       });
 
-      // ako sam logiran, dodaj i u moje cigle
-      if (user) {
-        setMyBrickIndexes((prev) =>
-          prev.includes(brick.brick_index)
-            ? prev
-            : [...prev, brick.brick_index]
+      setBricks((prev) => {
+        const exists = prev.some((b) => b.brick_index === brick.brick_index);
+        const updated: WallBrick = {
+          id: brick.id,
+          brick_index: brick.brick_index,
+          color: brick.color,
+          message: brick.message ?? null,
+          facebook_url: brick.facebook_url ?? null,
+          instagram_url: brick.instagram_url ?? null,
+          youtube_url: brick.youtube_url ?? null,
+          tiktok_url: brick.tiktok_url ?? null,
+          x_url: brick.x_url ?? null,
+          owner_id: user?.id ?? null,
+        };
+        if (exists) {
+          return prev.map((b) =>
+            b.brick_index === brick.brick_index ? updated : b
+          );
+        }
+        return [...prev, updated];
+      });
+
+      if (values.is_gift) {
+        alert(
+          `Gift brick purchased! Brick #${brick.brick_index} is now reserved and the recipient will get an email.`
+        );
+      } else {
+        alert(
+          `Success! Brick #${brick.brick_index} is now yours (x=${brick.x}, y=${brick.y}).`
         );
       }
 
-      alert(
-        `Kupnja uspješna! Tvoja cigla je #${brick.brick_index} (x=${brick.x}, y=${brick.y})`
-      );
       setBuyOpen(false);
     } catch (e: any) {
       console.error(e);
-      alert("Neočekivana greška, pokušaj ponovno.");
+      alert("Unexpected error during purchase.");
     }
   };
 
-  const currentBrickIndex = hoverBrickIndex ?? selectedBrickIndex;
-
-  const currentBrickCoords = useMemo(() => {
-    if (currentBrickIndex == null) return null;
-    return {
-      index: currentBrickIndex,
-      x: currentBrickIndex % WALL_WIDTH,
-      y: Math.floor(currentBrickIndex / WALL_WIDTH)
-    };
-  }, [currentBrickIndex]);
-
-  const shareUrl =
-    currentBrickIndex != null
-      ? `${window.location.origin}/wall?brick=${currentBrickIndex}`
-      : null;
-
-  const handleShare = async () => {
-    if (!shareUrl) return;
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      alert("Link kopiran u međuspremnik! 📋");
-    } catch {
-      alert("Nisam uspio kopirati, ali link je: " + shareUrl);
-    }
+  const handleHover = (brickIndex: number | null) => {
+    setHoveredBrickIndex(brickIndex);
   };
 
-  const handleFindMyBricks = () => {
+  const handleToggleMyBricks = () => {
     if (!user) {
-      alert("Prijavi se da vidiš svoje cigle.");
+      alert("You need to be logged in to highlight your bricks.");
       return;
     }
-    if (myBrickIndexes.length === 0) {
-      alert("Još nemaš nijednu ciglu. Klikni na zid i kupi jednu! 🧱");
+    if (!myBrickIndexes.length) {
+      alert("You don't own any bricks yet. Click somewhere on the wall to buy one! 🧱");
       return;
     }
-    setHighlightMyBricks(true);
-    setSelectedBrickIndex(myBrickIndexes[0]);
+    setHighlightMyBricks((prev) => !prev);
   };
-
-  const highlightedIndexes = highlightMyBricks ? myBrickIndexes : [];
 
   if (loadingWall) {
     return (
@@ -257,41 +308,35 @@ export default function WallPage() {
     );
   }
 
+  const hoveredCoords =
+    hoveredBrickIndex != null ? getCoords(hoveredBrickIndex) : null;
+
   return (
-    <div className="flex h-[calc(100vh-64px)] flex-col">
+    <div className="flex min-h-[400px] h-[calc(100vh-64px)] flex-col">
       <div className="relative flex-1">
-        {/* cijeli ekran = zid */}
         <FullWallCanvas
           soldBricks={soldBricks}
           onBrickClick={handleBrickClick}
-          onBrickHover={(idx) => setHoverBrickIndex(idx)}
+          onBrickHover={handleHover}
           highlightedBrickIndexes={highlightedIndexes}
         />
 
-        {/* HUD gore */}
-        <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
-          <div className="pointer-events-auto flex items-center gap-4 rounded-full bg-white/85 px-4 py-2 text-xs shadow">
+        {/* Bottom overlay controls */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 flex flex-wrap items-center justify-center gap-2 px-3 text-[11px] sm:text-xs md:text-sm">
+          <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-full bg-white/85 px-3 py-2 shadow">
             <span className="font-semibold text-slate-800">
-              {currentBrickCoords
-                ? `Brick #${currentBrickCoords.index} (x=${currentBrickCoords.x}, y=${currentBrickCoords.y})`
-                : "Hover or click a brick"}
+              {hoveredBrickIndex != null && hoveredCoords
+                ? `Brick #${hoveredBrickIndex} (x=${hoveredCoords.x}, y=${hoveredCoords.y})`
+                : "Tap or hover a brick to inspect it"}
             </span>
-            {shareUrl && (
-              <button
-                onClick={handleShare}
-                className="rounded-full bg-slate-900 px-3 py-1 text-[11px] font-semibold text-white"
-              >
-                Share this brick
-              </button>
-            )}
-            {user && (
-              <button
-                onClick={handleFindMyBricks}
-                className="rounded-full bg-brickYellow px-3 py-1 text-[11px] font-semibold text-slate-900"
-              >
-                Find my bricks
-              </button>
-            )}
+
+            <button
+              type="button"
+              onClick={handleToggleMyBricks}
+              className="rounded-full bg-brickYellow px-3 py-1 text-[11px] font-semibold text-slate-900 hover:brightness-105"
+            >
+              {highlightMyBricks ? "Hide my bricks" : "Highlight my bricks"}
+            </button>
           </div>
         </div>
       </div>
@@ -304,7 +349,19 @@ export default function WallPage() {
 
       <BrickDetailsModal
         open={detailsOpen}
-        brick={selectedBrickDetails}
+        brick={
+          selectedBrickDetails && {
+            id: selectedBrickDetails.id,
+            brick_index: selectedBrickDetails.brick_index,
+            color: selectedBrickDetails.color,
+            message: selectedBrickDetails.message,
+            facebook_url: selectedBrickDetails.facebook_url,
+            instagram_url: selectedBrickDetails.instagram_url,
+            youtube_url: selectedBrickDetails.youtube_url,
+            tiktok_url: selectedBrickDetails.tiktok_url,
+            x_url: selectedBrickDetails.x_url,
+          }
+        }
         onClose={() => setDetailsOpen(false)}
       />
     </div>
