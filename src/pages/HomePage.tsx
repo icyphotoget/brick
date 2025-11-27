@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
 const TOTAL_BRICKS = 1_000_000;
+const PRICE_USD_PER_BRICK = 1;
 
 type FeaturedBrick = {
   brick_index: number;
@@ -109,6 +110,11 @@ export default function HomePage() {
       ? `${claimedCount.toLocaleString()} claimed so far`
       : "Loading claimed bricks…";
 
+  const priceLabel =
+    PRICE_USD_PER_BRICK % 1 === 0
+      ? `$${PRICE_USD_PER_BRICK}`
+      : `$${PRICE_USD_PER_BRICK.toFixed(2)}`;
+
   const handleBuyClick = () => {
     navigate("/wall#buy");
   };
@@ -172,9 +178,13 @@ export default function HomePage() {
             >
               View the wall
             </Link>
-
-            {/* Fullscreen wall link removed */}
           </div>
+
+          {/* New: clear price + payment info */}
+          <p className="mt-2 text-[11px] text-slate-600 sm:text-xs">
+            Bricks are just <span className="font-semibold">{priceLabel}</span>{" "}
+            each. Pay with SOL or USDC on Solana.
+          </p>
 
           <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-white/80 px-3 py-1.5 text-[11px] text-slate-600 shadow-sm">
             <span role="img" aria-label="bricks">
@@ -187,6 +197,12 @@ export default function HomePage() {
               • Live wall, updated instantly
             </span>
           </div>
+
+          {/* New: reassurance that it’s quick/easy */}
+          <p className="mt-2 text-[11px] text-slate-500 sm:text-xs">
+            Claim your brick in under 30 seconds. Log in with Google and connect
+            your Solana wallet when you&apos;re ready to pay.
+          </p>
 
           {error && (
             <p className="mt-3 text-xs text-red-500">
